@@ -35,8 +35,7 @@ captures/
 # Intellij
 *.iml
 /.idea/*
+/.idea/
 # Keystore files
 *.jks
 .DS_Store
-
-/local.properties
