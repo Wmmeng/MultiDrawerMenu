@@ -5,8 +5,8 @@ import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Rect;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
@@ -29,9 +29,9 @@ public class MultiCardMenu extends ViewGroup {
     private int titleBarHeight = dip2px(60);
     private int titleBarHeightOfDisplay = dip2px(20);
 
-    private int currentIndex = -1;
+    private int mShowingDrawerIndex = INVAILD_POSITION;
 
-    private int mActionDownIndex = -1;
+    private int mActionDownIndex = INVAILD_POSITION;
 
     private int mMarginTop = 10;
 
@@ -46,6 +46,17 @@ public class MultiCardMenu extends ViewGroup {
     private float mTouchCardOriginY;
 
     private VelocityTracker mVelocityTracker;
+
+    private float xVelocity;
+
+    private float yVelocity;
+
+    private float mEventDownX;
+
+    private float mEventDownY;
+
+    private float mLastEventY;
+
     public MultiCardMenu(Context context) {
         super(context);
     }
@@ -58,8 +69,25 @@ public class MultiCardMenu extends ViewGroup {
         super(context, attrs, defStyleAttr);
     }
 
-    private void init(){
-        mVelocityTracker = mVelocityTracker.obtain();
+    private void initVelocityTracker(MotionEvent event) {
+        if(mVelocityTracker == null) {
+            mVelocityTracker = VelocityTracker.obtain();
+        }
+        mVelocityTracker.addMovement(event);
+    }
+
+    private void releaseVelocityTracker() {
+        if(mVelocityTracker != null) {
+            mVelocityTracker.clear();
+            mVelocityTracker.recycle();
+            mVelocityTracker = null;
+        }
+    }
+
+    private void computeVelocity(MotionEvent event){
+        mVelocityTracker.addMovement(event);
+        xVelocity = mVelocityTracker.getXVelocity();
+        yVelocity = mVelocityTracker.getYVelocity();
     }
 
     @Override
@@ -81,51 +109,42 @@ public class MultiCardMenu extends ViewGroup {
     }
 
 
-    public void openMenu(int index){
+    public void openDrawer(int index){
         if(index < 0 || index >= getChildCount()){
             throw  new IllegalArgumentException("index is out of child count");
         }
         if(isAnimating) {
             return;
         }
-        isOpen = true;
-        currentIndex = index;
+        mShowingDrawerIndex = index;
         int childCount = mChildCount;
         int marginTop = dip2px(mMarginTop);
         final View showCard = getChildAt(index);
         ArrayList<Animator> animators = new ArrayList<>();
         AnimatorSet animatorSet = new AnimatorSet();
-//        ValueAnimator displayAnimator = ValueAnimator.ofFloat(showCard.getY(), marginTop);
-//        displayAnimator.setInterpolator(openInterpolator);
-//        displayAnimator.setTarget(showCard);
-//        displayAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-//            @Override
-//            public void onAnimationUpdate(ValueAnimator animation) {
-//                showCard.setY((Float) animation.getAnimatedValue());
-//            }
-//        });
-        ObjectAnimator displayAnimator = ObjectAnimator.ofInt(showCard, "top", showCard
-                .getTop(),
-                marginTop);
+        ValueAnimator displayTopAnimator = ValueAnimator.ofFloat(showCard.getY(), marginTop);
+        displayTopAnimator.setInterpolator(openInterpolator);
+        displayTopAnimator.setTarget(showCard);
+        displayTopAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                showCard.setY((Float) animation.getAnimatedValue());
+            }
+        });
+        animators.add(displayTopAnimator);
+
         int j = 1;
         for (int i = 0; i < childCount; i++) {
             if(i != index) {
                 final View c = getChildAt(i);
-                ValueAnimator animator = ValueAnimator.ofFloat(c.getY(),
-                        (getMeasuredHeight() - (childCount - j) * (titleBarHeightOfDisplay)));
-                animator.setTarget(getChildAt(i));
-                animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                    @Override
-                    public void onAnimationUpdate(ValueAnimator animation) {
-                        c.setY((Float) animation.getAnimatedValue());
-                    }
-                });
-                animators.add(animator);
+                animators.add(ObjectAnimator.ofFloat(c, "y", c.getY(), getMeasuredHeight() -
+                        (childCount - j) *
+                titleBarHeightOfDisplay));
                 j++;
             }
         }
 
-        animators.add(displayAnimator);
+
         animatorSet.playTogether(animators);
         animatorSet.setInterpolator(openInterpolator);
         animatorSet.setDuration(300);
@@ -133,6 +152,7 @@ public class MultiCardMenu extends ViewGroup {
             @Override
             public void onAnimationStart(Animator animation) {
                 isAnimating = true;
+                isOpen = true;
             }
 
             @Override
@@ -153,20 +173,27 @@ public class MultiCardMenu extends ViewGroup {
         animatorSet.start();
     }
 
-    private void closeMenu(){
-        Log.d(TAG, "closeMenu: currentIndex->" +currentIndex);
-        if(currentIndex == -1 || isAnimating) {
+    private void closeDrawer(){
+        if(isAnimating) {
             return;
         }
-        isOpen = false;
+
         ArrayList<Animator> animators = new ArrayList<>();
-        View showCard = getChildAt(currentIndex);
-        int showCardTop = getMeasuredHeight() - (mChildCount - currentIndex) * titleBarHeight;
-        ObjectAnimator closeAnimator = ObjectAnimator.ofInt(showCard, "top", showCard.getTop(),
-                showCardTop);
-        animators.add(closeAnimator);
+        if(mShowingDrawerIndex != -1) {
+            final View showCard = getChildAt(mShowingDrawerIndex);
+            int showCardTop = getMeasuredHeight() - (mChildCount - mShowingDrawerIndex) * titleBarHeight;
+            ValueAnimator closeAnimator = ValueAnimator.ofFloat(showCard.getY(), showCardTop);
+            closeAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator animation) {
+                    showCard.setY((Float) animation.getAnimatedValue());
+                }
+            });
+            animators.add(closeAnimator);
+        }
+
         for (int i = 0; i < mChildCount; i++) {
-            if(i != currentIndex) {
+            if(i != mShowingDrawerIndex) {
                 View c = getChildAt(i);
                 int top = getMeasuredHeight() - (mChildCount - i) * titleBarHeight;
                 ObjectAnimator animator = ObjectAnimator.ofFloat(c, "y", c.getY(), top);
@@ -180,11 +207,12 @@ public class MultiCardMenu extends ViewGroup {
             @Override
             public void onAnimationStart(Animator animation) {
                 isAnimating = true;
+                isOpen = false;
             }
 
             @Override
             public void onAnimationEnd(Animator animation) {
-                currentIndex = -1;
+                mShowingDrawerIndex = -1;
                 isAnimating = false;
             }
 
@@ -203,52 +231,63 @@ public class MultiCardMenu extends ViewGroup {
     }
 
     private boolean handleActionDown(MotionEvent event){
+        if(isAnimating) {
+            return false;
+        }
         float downX = event.getX();
         float downY = event.getY();
-        lastY = downY;
+        mEventDownX = downX;
+        mEventDownY = mLastEventY = downY;
         int index = pointToPosition(downX, downY);
-        Log.d(TAG, "handleActionDown: index->" + index);
-        mActionDownIndex = index;
         if(index == INVAILD_POSITION) {
             return false;
         }
+        mActionDownIndex = index;
         mTouchingCard = getChildAt(index);
         mTouchCardOriginY = mTouchingCard.getY();
         return true;
     }
 
-    private float lastY;
+
     private void handleActionMove(MotionEvent event){
-        if(mActionDownIndex == INVAILD_POSITION) {
+        if(mActionDownIndex == INVAILD_POSITION || isAnimating) {
             return;
         }
-        float distanceY = event.getY() - lastY;
+
+        if(isOpen && mActionDownIndex != mShowingDrawerIndex) {
+            return;
+        }
+
+        computeVelocity(event);
+        if(Math.abs(yVelocity) < Math.abs(xVelocity)) return;
+        float deltaY = event.getY() - mLastEventY;
         int originTop = getMeasuredHeight() - (mChildCount - mActionDownIndex) * titleBarHeight;
         int marginTop = dip2px(mMarginTop);
-        if(mTouchingCard.getY() + distanceY >= originTop || mTouchingCard.getY() + distanceY < marginTop) {
-            distanceY = 0;
+        if(mTouchingCard.getY() + deltaY >= originTop) {
+            mTouchingCard.offsetTopAndBottom((int) (originTop - mTouchingCard.getY()));
+        } else if(mTouchingCard.getY() + deltaY <= marginTop){
+            mTouchingCard.offsetTopAndBottom((int) (marginTop - mTouchingCard.getY()));
+        }else{
+            mTouchingCard.offsetTopAndBottom((int) deltaY);
         }
-//        dragView.setY(dragView.getY() + distanceY);
-        mTouchingCard.offsetTopAndBottom((int) distanceY);
-        lastY = event.getY();
+
+        mLastEventY = event.getY();
     }
 
 
     private void handleActionUpOrCancel(MotionEvent ev) {
-        int mTouchingCardTop = mTouchingCard.getTop();
+        if(isAnimating) return;
         if(isOpen) {
-            if(Math.abs(ev.getY() - mTouchCardOriginY) > 50 && mActionDownIndex != -1){
-                currentIndex = mActionDownIndex;
-                closeMenu();
+            if(Math.abs(ev.getY() - mEventDownY) > 50 && mActionDownIndex != -1){
+                closeDrawer();
             } else if(mActionDownIndex != -1){
-                openMenu(mActionDownIndex);
+                openDrawer(mActionDownIndex);
             }
         } else {
-            if(Math.abs(ev.getY() - mTouchCardOriginY) > 50 && mActionDownIndex != -1){
-                openMenu(mActionDownIndex);
+            if(Math.abs(ev.getY() - mEventDownY) > 50 && mActionDownIndex != -1){
+                openDrawer(mActionDownIndex);
             } else if(mActionDownIndex != -1){
-                currentIndex = mActionDownIndex;
-                closeMenu();
+                closeDrawer();
             }
         }
         mTouchCardOriginY = 0;
@@ -257,10 +296,10 @@ public class MultiCardMenu extends ViewGroup {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        initVelocityTracker(ev);
         boolean isConsume = false;
         switch (ev.getAction()) {
             case MotionEvent.ACTION_DOWN:
-                Log.d(TAG, "dispatchTouchEvent: ACTION_DOWN");
                 isConsume = handleActionDown(ev);
                 break;
             case MotionEvent.ACTION_MOVE:
@@ -269,6 +308,7 @@ public class MultiCardMenu extends ViewGroup {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 handleActionUpOrCancel(ev);
+                releaseVelocityTracker();
                 break;
         }
         return isConsume || super.dispatchTouchEvent(ev);
@@ -283,36 +323,15 @@ public class MultiCardMenu extends ViewGroup {
         return super.onInterceptTouchEvent(ev);
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getAction()){
-            case MotionEvent.ACTION_DOWN:
-//                Log.d(TAG, "onTouchEvent: ACTION_DOWN  isOpen->" + isOpen);
-//                if(isOpen) {
-//                    closeMenu();
-//                }else{
-//                    currentIndex = pointToPosition(event.getX(), event.getY());
-//                    if(currentIndex == -1) {
-//                        Log.d(TAG, "onTouchEvent: currentIndex == -1");
-//                    } else {
-//                        openMenu(currentIndex);
-//                    }
-//                }
-                break;
-        }
-        return true;
-    }
 
     private int pointToPosition(float x, float y){
         int childCount = mChildCount;
+        Rect frame = new Rect();
         for (int i = 0; i < childCount; i++) {
             View child = getChildAt(i);
-            int left = child.getLeft();
-            int right = child.getRight();
-            int top = child.getTop();
-            int titleBottom = child.getTop() + titleBarHeight;
-            if(x > left && x < right && y > top && y < titleBottom) {
-                Log.d(TAG, "onTouchEvent: currentIndex ->" + i);
+            child.getHitRect(frame);
+            frame.bottom = frame.top + titleBarHeight;
+            if(frame.contains((int)x, (int)y)) {
                 return i;
             }
         }
@@ -325,13 +344,5 @@ public class MultiCardMenu extends ViewGroup {
     public int dip2px(float dpValue) {
         final float scale = getContext().getResources().getDisplayMetrics().density;
         return (int) (dpValue * scale + 0.5f);
-    }
-
-    /**
-     * 根据手机的分辨率从 px(像素) 的单位 转成为 dp
-     */
-    public int px2dip(float pxValue) {
-        final float scale = getContext().getResources().getDisplayMetrics().density;
-        return (int) (pxValue / scale + 0.5f);
     }
 }
